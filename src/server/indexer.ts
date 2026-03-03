@@ -1,28 +1,28 @@
 import * as fs from "fs";
 import * as path from "path";
+import chokidar from "chokidar";
 import { GitAnalyzer } from "./git";
+import { parseFile } from "./parser";
 import type {
   FileNode,
-  Import,
-  Export,
-  FunctionNode,
-  ComponentNode,
-  HookUsage,
-  ApiCall,
   DependencyEdge,
   AffectedFile,
   StackFrame,
 } from "../shared/types";
 
-const IGNORED_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".cache"]);
+const IGNORED_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".cache", "coverage"]);
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 
 export class CodeIndexer {
   private nodes: Map<string, FileNode> = new Map();
   private edges: Map<string, DependencyEdge[]> = new Map();
+  // Reverse index: filepath -> list of files that import it
+  private reverseEdges: Map<string, Set<string>> = new Map();
   private projectRoot: string;
   private git: GitAnalyzer;
   private tsconfigAliases: Record<string, string> = {};
+  private baseUrl: string = "";
+  private watcher: chokidar.FSWatcher | null = null;
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
@@ -41,38 +41,101 @@ export class CodeIndexer {
     return count;
   }
 
+  // ─── Indexing ───
+
   /**
    * Index the entire project.
    */
   async index(): Promise<void> {
-    this.loadTsconfigAliases();
+    this.loadPathAliases();
     const files = this.walkDirectory(this.projectRoot);
 
-    for (const file of files) {
-      await this.indexFile(file);
+    // Parse files in parallel batches for speed
+    const batchSize = 50;
+    for (let i = 0; i < files.length; i += batchSize) {
+      const batch = files.slice(i, i + batchSize);
+      await Promise.all(batch.map((f) => this.indexFile(f)));
     }
 
     this.buildEdges();
   }
 
   /**
-   * Re-index a single file (for incremental updates).
+   * Re-index a single file and update the graph.
    */
   async reindexFile(filepath: string): Promise<void> {
-    await this.indexFile(filepath);
-    // Rebuild edges for this file and its importers
-    this.rebuildEdgesFor(filepath);
+    const fullPath = path.isAbsolute(filepath)
+      ? filepath
+      : path.join(this.projectRoot, filepath);
+    const relativePath = path.relative(this.projectRoot, fullPath);
+
+    if (!fs.existsSync(fullPath)) {
+      // File was deleted — remove from graph
+      this.removeFile(relativePath);
+      return;
+    }
+
+    await this.indexFile(fullPath);
+    this.rebuildEdgesFor(relativePath);
+
+    // Also re-resolve edges for files that import this one
+    const importers = this.getImportersOf(relativePath);
+    for (const imp of importers) {
+      this.rebuildEdgesFor(imp);
+    }
   }
 
   /**
-   * Start watching files for changes.
+   * Start watching files for changes via chokidar.
    */
   watch(): void {
-    // Chokidar watcher will be wired in Phase 2
+    if (this.watcher) return;
+
+    this.watcher = chokidar.watch(this.projectRoot, {
+      ignored: [
+        "**/node_modules/**",
+        "**/.next/**",
+        "**/.git/**",
+        "**/dist/**",
+        "**/build/**",
+        "**/.cache/**",
+        "**/coverage/**",
+      ],
+      persistent: true,
+      ignoreInitial: true,
+    });
+
+    const handleChange = async (filepath: string) => {
+      const ext = path.extname(filepath);
+      if (!SOURCE_EXTENSIONS.has(ext)) return;
+
+      console.log(`[Unravel] File changed: ${path.relative(this.projectRoot, filepath)}`);
+      await this.reindexFile(filepath);
+    };
+
+    this.watcher.on("change", handleChange);
+    this.watcher.on("add", handleChange);
+    this.watcher.on("unlink", (filepath) => {
+      const relativePath = path.relative(this.projectRoot, filepath);
+      this.removeFile(relativePath);
+      console.log(`[Unravel] File removed: ${relativePath}`);
+    });
   }
 
   /**
-   * Gather context for a set of stack trace files.
+   * Stop watching for changes.
+   */
+  async stopWatching(): Promise<void> {
+    if (this.watcher) {
+      await this.watcher.close();
+      this.watcher = null;
+    }
+  }
+
+  // ─── Context Gathering ───
+
+  /**
+   * Gather context for a set of stack trace files to send to the analyzer.
    */
   gatherContext(
     stackFrames: StackFrame[],
@@ -93,7 +156,7 @@ export class CodeIndexer {
       const node = this.nodes.get(relativePath);
       if (!node) continue;
 
-      // Read the relevant code around the error line
+      // Extract relevant code around the error line
       const relevantCode = this.extractRelevantCode(frame.file, frame.line);
 
       affectedFiles.push({
@@ -103,7 +166,7 @@ export class CodeIndexer {
         recentChanges: node.recentChanges,
       });
 
-      // Also include direct importers (they might be the actual cause)
+      // Include direct importers — they might be the actual cause
       const importers = this.getImportersOf(relativePath);
       for (const imp of importers.slice(0, 3)) {
         if (seen.has(imp)) continue;
@@ -120,10 +183,8 @@ export class CodeIndexer {
       }
     }
 
-    // Build data flow path from the stack
     const dataFlowPath = affectedFiles.map((f) => f.path);
 
-    // Find related components
     const relatedComponents: string[] = [];
     for (const af of affectedFiles) {
       const node = this.nodes.get(af.path);
@@ -135,55 +196,119 @@ export class CodeIndexer {
     return { affectedFiles, dataFlowPath, relatedComponents };
   }
 
-  // ─── Query Methods ───
+  // ─── Graph Query Methods ───
 
+  /**
+   * Get all files that import the given filepath.
+   */
   getImportersOf(filepath: string): string[] {
-    const importers: string[] = [];
-    for (const [file, edges] of this.edges) {
-      if (edges.some((e) => e.to === filepath)) {
-        importers.push(file);
-      }
-    }
-    return importers;
+    return Array.from(this.reverseEdges.get(filepath) ?? []);
   }
 
+  /**
+   * Get all files that the given filepath imports.
+   */
   getDependenciesOf(filepath: string): string[] {
     const edges = this.edges.get(filepath) ?? [];
-    return edges.map((e) => e.to);
+    return [...new Set(edges.map((e) => e.to))];
   }
 
+  /**
+   * Get all transitive dependents up to N levels deep.
+   */
   getTransitiveDependents(filepath: string, depth: number): string[] {
     const result = new Set<string>();
-    const queue = [filepath];
-    let currentDepth = 0;
+    let frontier = [filepath];
 
-    while (queue.length > 0 && currentDepth < depth) {
-      const nextQueue: string[] = [];
-      for (const file of queue) {
-        const importers = this.getImportersOf(file);
-        for (const imp of importers) {
-          if (!result.has(imp)) {
+    for (let d = 0; d < depth && frontier.length > 0; d++) {
+      const next: string[] = [];
+      for (const file of frontier) {
+        for (const imp of this.getImportersOf(file)) {
+          if (!result.has(imp) && imp !== filepath) {
             result.add(imp);
-            nextQueue.push(imp);
+            next.push(imp);
           }
         }
       }
-      queue.length = 0;
-      queue.push(...nextQueue);
-      currentDepth++;
+      frontier = next;
     }
 
     return Array.from(result);
   }
 
-  // ─── Internal Methods ───
+  /**
+   * Build the component render tree starting from a named component.
+   * Returns a tree of component names based on which components render which.
+   */
+  getComponentTree(componentName: string): { name: string; children: any[] } | null {
+    // Find the file that defines this component
+    let defFile: string | null = null;
+    for (const [filepath, node] of this.nodes) {
+      if (node.components.some((c) => c.name === componentName) ||
+          node.exports.some((e) => e.name === componentName)) {
+        defFile = filepath;
+        break;
+      }
+    }
+    if (!defFile) return null;
+
+    return this.buildComponentSubtree(componentName, defFile, new Set());
+  }
+
+  /**
+   * Trace the data flow path between two files.
+   * Returns all shortest paths through the import graph.
+   */
+  traceDataFlow(from: string, to: string): string[][] {
+    if (from === to) return [[from]];
+
+    // BFS to find shortest paths
+    const queue: string[][] = [[from]];
+    const visited = new Set<string>([from]);
+    const paths: string[][] = [];
+    let shortestLength = Infinity;
+
+    while (queue.length > 0) {
+      const currentPath = queue.shift()!;
+      if (currentPath.length > shortestLength) break;
+
+      const current = currentPath[currentPath.length - 1];
+      const deps = this.getDependenciesOf(current);
+      const importers = this.getImportersOf(current);
+      const neighbors = [...deps, ...importers];
+
+      for (const neighbor of neighbors) {
+        const newPath = [...currentPath, neighbor];
+
+        if (neighbor === to) {
+          paths.push(newPath);
+          shortestLength = newPath.length;
+          continue;
+        }
+
+        if (!visited.has(neighbor) && newPath.length < shortestLength) {
+          visited.add(neighbor);
+          queue.push(newPath);
+        }
+      }
+    }
+
+    return paths;
+  }
+
+  // ─── Internal: File System ───
 
   private walkDirectory(dir: string): string[] {
     const files: string[] = [];
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return files;
+    }
 
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.name.startsWith(".") && entry.name !== ".") continue;
+      if (entry.name.startsWith(".")) continue;
       if (IGNORED_DIRS.has(entry.name)) continue;
 
       const fullPath = path.join(dir, entry.name);
@@ -198,29 +323,47 @@ export class CodeIndexer {
     return files;
   }
 
+  private readFileContent(filepath: string): string {
+    try {
+      return fs.readFileSync(filepath, "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  private extractRelevantCode(filepath: string, errorLine: number): string {
+    try {
+      const content = fs.readFileSync(filepath, "utf-8");
+      const lines = content.split("\n");
+      const start = Math.max(0, errorLine - 15);
+      const end = Math.min(lines.length, errorLine + 15);
+      return lines.slice(start, end).join("\n");
+    } catch {
+      return "";
+    }
+  }
+
+  // ─── Internal: Indexing ───
+
   private async indexFile(fullPath: string): Promise<void> {
     const relativePath = path.relative(this.projectRoot, fullPath);
     const content = this.readFileContent(fullPath);
     if (!content) return;
 
-    const imports = this.parseImports(content);
-    const exports = this.parseExports(content);
-    const functions = this.parseFunctions(content);
-    const components = this.parseComponents(content);
-    const hooks = this.parseHooks(content);
-    const apiCalls = this.parseApiCalls(content);
+    // Parse with SWC AST parser
+    const parsed = parseFile(content, fullPath);
 
     const { date, author } = await this.git.getLastModified(relativePath);
     const recentChanges = await this.git.getFileHistory(relativePath, 5);
 
     const node: FileNode = {
       path: relativePath,
-      imports,
-      exports,
-      functions,
-      components,
-      hooks,
-      apiCalls,
+      imports: parsed.imports,
+      exports: parsed.exports,
+      functions: parsed.functions,
+      components: parsed.components,
+      hooks: parsed.hooks,
+      apiCalls: parsed.apiCalls,
       lastModified: date,
       lastModifiedBy: author,
       recentChanges,
@@ -229,7 +372,23 @@ export class CodeIndexer {
     this.nodes.set(relativePath, node);
   }
 
+  private removeFile(relativePath: string): void {
+    this.nodes.delete(relativePath);
+    // Clean up forward edges
+    this.edges.delete(relativePath);
+    // Clean up reverse edges
+    for (const [, importers] of this.reverseEdges) {
+      importers.delete(relativePath);
+    }
+    this.reverseEdges.delete(relativePath);
+  }
+
+  // ─── Internal: Edge Building ───
+
   private buildEdges(): void {
+    this.edges.clear();
+    this.reverseEdges.clear();
+
     for (const [filepath, node] of this.nodes) {
       const fileEdges: DependencyEdge[] = [];
 
@@ -242,6 +401,12 @@ export class CodeIndexer {
             type: "import",
             symbols: imp.names,
           });
+
+          // Update reverse index
+          if (!this.reverseEdges.has(resolved)) {
+            this.reverseEdges.set(resolved, new Set());
+          }
+          this.reverseEdges.get(resolved)!.add(filepath);
         }
       }
 
@@ -253,6 +418,13 @@ export class CodeIndexer {
     const node = this.nodes.get(filepath);
     if (!node) return;
 
+    // Remove old reverse edges for this file
+    const oldEdges = this.edges.get(filepath) ?? [];
+    for (const edge of oldEdges) {
+      this.reverseEdges.get(edge.to)?.delete(filepath);
+    }
+
+    // Build new forward edges
     const fileEdges: DependencyEdge[] = [];
     for (const imp of node.imports) {
       const resolved = this.resolveImport(imp.source, filepath);
@@ -263,30 +435,68 @@ export class CodeIndexer {
           type: "import",
           symbols: imp.names,
         });
+
+        // Update reverse index
+        if (!this.reverseEdges.has(resolved)) {
+          this.reverseEdges.set(resolved, new Set());
+        }
+        this.reverseEdges.get(resolved)!.add(filepath);
       }
     }
+
     this.edges.set(filepath, fileEdges);
   }
 
+  // ─── Internal: Import Resolution ───
+
   private resolveImport(source: string, fromFile: string): string | null {
-    // Skip external packages
+    // Skip external packages (no relative/absolute path, no alias match)
     if (!source.startsWith(".") && !source.startsWith("/")) {
-      // Check tsconfig aliases
-      for (const [alias, target] of Object.entries(this.tsconfigAliases)) {
-        const aliasPrefix = alias.replace("/*", "");
-        if (source.startsWith(aliasPrefix)) {
-          const rest = source.slice(aliasPrefix.length);
-          source = target.replace("/*", "") + rest;
-          break;
-        }
-      }
-      if (!source.startsWith(".") && !source.startsWith("/")) {
+      // Check tsconfig/jsconfig path aliases
+      const aliased = this.resolveAlias(source);
+      if (aliased) {
+        source = aliased;
+      } else if (this.baseUrl) {
+        // Try baseUrl resolution
+        const baseResolved = path.join(this.baseUrl, source);
+        const result = this.tryResolve(baseResolved);
+        if (result) return result;
+        return null;
+      } else {
         return null;
       }
     }
 
     const dir = path.dirname(fromFile);
     const resolved = path.join(dir, source);
+    return this.tryResolve(resolved);
+  }
+
+  private resolveAlias(source: string): string | null {
+    for (const [alias, target] of Object.entries(this.tsconfigAliases)) {
+      const aliasPrefix = alias.replace("/*", "").replace("*", "");
+
+      if (alias.includes("*")) {
+        // Wildcard alias: @/* -> src/*
+        if (source.startsWith(aliasPrefix)) {
+          const rest = source.slice(aliasPrefix.length);
+          const targetBase = target.replace("/*", "").replace("*", "");
+          return "./" + path.join(targetBase, rest);
+        }
+      } else {
+        // Exact alias: @components -> src/components
+        if (source === aliasPrefix || source.startsWith(aliasPrefix + "/")) {
+          const rest = source.slice(aliasPrefix.length);
+          return "./" + path.join(target, rest);
+        }
+      }
+    }
+    return null;
+  }
+
+  private tryResolve(resolved: string): string | null {
+    // Exact match
+    if (this.nodes.has(resolved)) return resolved;
 
     // Try extensions
     for (const ext of [".ts", ".tsx", ".js", ".jsx"]) {
@@ -299,224 +509,70 @@ export class CodeIndexer {
       if (this.nodes.has(indexPath)) return indexPath;
     }
 
-    // Exact match
-    if (this.nodes.has(resolved)) return resolved;
-
     return null;
   }
 
-  private loadTsconfigAliases(): void {
-    try {
-      const tsconfigPath = path.join(this.projectRoot, "tsconfig.json");
-      if (fs.existsSync(tsconfigPath)) {
-        const raw = fs.readFileSync(tsconfigPath, "utf-8");
-        const tsconfig = JSON.parse(raw);
-        const paths = tsconfig.compilerOptions?.paths ?? {};
+  private loadPathAliases(): void {
+    // Try tsconfig.json first, then jsconfig.json
+    for (const configFile of ["tsconfig.json", "jsconfig.json"]) {
+      try {
+        const configPath = path.join(this.projectRoot, configFile);
+        if (!fs.existsSync(configPath)) continue;
+
+        const raw = fs.readFileSync(configPath, "utf-8");
+        const config = JSON.parse(raw);
+        const compilerOptions = config.compilerOptions ?? {};
+
+        // Load baseUrl
+        if (compilerOptions.baseUrl) {
+          this.baseUrl = compilerOptions.baseUrl;
+        }
+
+        // Load path aliases
+        const paths = compilerOptions.paths ?? {};
         for (const [key, value] of Object.entries(paths)) {
           if (Array.isArray(value) && value.length > 0) {
             this.tsconfigAliases[key] = value[0] as string;
           }
         }
+
+        break; // Use first config found
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
     }
   }
 
-  // ─── Regex-based Parsing (Phase 1 — replaced by tree-sitter in Phase 2) ───
+  // ─── Internal: Component Tree ───
 
-  private parseImports(content: string): Import[] {
-    const imports: Import[] = [];
-    const lines = content.split("\n");
+  private buildComponentSubtree(
+    name: string,
+    filepath: string,
+    visited: Set<string>
+  ): { name: string; children: any[] } {
+    if (visited.has(name)) return { name: `${name} (circular)`, children: [] };
+    visited.add(name);
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    const children: { name: string; children: any[] }[] = [];
 
-      // import { Foo, Bar } from "module"
-      const namedMatch = line.match(
-        /import\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']/
-      );
-      if (namedMatch) {
-        const names = namedMatch[1].split(",").map((n) => n.trim().split(" as ")[0].trim()).filter(Boolean);
-        imports.push({ source: namedMatch[2], names, isDefault: false, line: i + 1 });
-        continue;
-      }
+    // Find components rendered by this file (i.e., what does this file import that are components?)
+    const deps = this.getDependenciesOf(filepath);
+    for (const dep of deps) {
+      const depNode = this.nodes.get(dep);
+      if (!depNode) continue;
 
-      // import Foo from "module"
-      const defaultMatch = line.match(
-        /import\s+(\w+)\s+from\s+["']([^"']+)["']/
-      );
-      if (defaultMatch) {
-        imports.push({ source: defaultMatch[2], names: [defaultMatch[1]], isDefault: true, line: i + 1 });
-        continue;
-      }
-
-      // import * as Foo from "module"
-      const starMatch = line.match(
-        /import\s+\*\s+as\s+(\w+)\s+from\s+["']([^"']+)["']/
-      );
-      if (starMatch) {
-        imports.push({ source: starMatch[2], names: [starMatch[1]], isDefault: false, line: i + 1 });
-        continue;
-      }
-
-      // const Foo = require("module")
-      const requireMatch = line.match(
-        /(?:const|let|var)\s+(?:\{([^}]+)\}|(\w+))\s*=\s*require\s*\(\s*["']([^"']+)["']\s*\)/
-      );
-      if (requireMatch) {
-        const names = requireMatch[1]
-          ? requireMatch[1].split(",").map((n) => n.trim()).filter(Boolean)
-          : [requireMatch[2]];
-        imports.push({ source: requireMatch[3], names, isDefault: !requireMatch[1], line: i + 1 });
+      for (const comp of depNode.components) {
+        // Check if this component is actually imported by the file
+        const edges = this.edges.get(filepath) ?? [];
+        const isImported = edges.some(
+          (e) => e.to === dep && e.symbols.includes(comp.name)
+        );
+        if (isImported) {
+          children.push(this.buildComponentSubtree(comp.name, dep, visited));
+        }
       }
     }
 
-    return imports;
-  }
-
-  private parseExports(content: string): Export[] {
-    const exports: Export[] = [];
-    const lines = content.split("\n");
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // export default
-      if (line.match(/export\s+default\s/)) {
-        exports.push({ name: "default", type: "default", line: i + 1 });
-        continue;
-      }
-
-      // export function / export const / export class
-      const namedExport = line.match(
-        /export\s+(?:async\s+)?(function|const|let|var|class|type|interface)\s+(\w+)/
-      );
-      if (namedExport) {
-        const kind = namedExport[1];
-        const name = namedExport[2];
-        let type: Export["type"] = "constant";
-        if (kind === "function" || kind === "class") type = "function";
-        if (kind === "type" || kind === "interface") type = "type";
-        if (name[0] === name[0].toUpperCase() && kind === "function") type = "component";
-        exports.push({ name, type, line: i + 1 });
-      }
-    }
-
-    return exports;
-  }
-
-  private parseFunctions(content: string): FunctionNode[] {
-    const functions: FunctionNode[] = [];
-    const lines = content.split("\n");
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      const match = line.match(
-        /(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\(([^)]*)\)/
-      );
-      if (match) {
-        const params = match[2]
-          .split(",")
-          .map((p) => p.trim().split(":")[0].trim())
-          .filter(Boolean);
-        functions.push({ name: match[1], params, line: i + 1, endLine: i + 1 });
-      }
-
-      // Arrow functions assigned to const
-      const arrowMatch = line.match(
-        /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*(?::\s*\w+)?\s*=>/
-      );
-      if (arrowMatch) {
-        const params = arrowMatch[2]
-          .split(",")
-          .map((p) => p.trim().split(":")[0].trim())
-          .filter(Boolean);
-        functions.push({ name: arrowMatch[1], params, line: i + 1, endLine: i + 1 });
-      }
-    }
-
-    return functions;
-  }
-
-  private parseComponents(content: string): ComponentNode[] {
-    // Components are functions that start with uppercase
-    const components: ComponentNode[] = [];
-    const functions = this.parseFunctions(content);
-    const hooks = this.parseHooks(content);
-
-    for (const fn of functions) {
-      if (fn.name[0] === fn.name[0].toUpperCase() && /[A-Z]/.test(fn.name[0])) {
-        components.push({
-          name: fn.name,
-          props: fn.params,
-          hooks: hooks.map((h) => h.name),
-          line: fn.line,
-          endLine: fn.endLine,
-        });
-      }
-    }
-
-    return components;
-  }
-
-  private parseHooks(content: string): HookUsage[] {
-    const hooks: HookUsage[] = [];
-    const lines = content.split("\n");
-
-    for (let i = 0; i < lines.length; i++) {
-      const matches = lines[i].matchAll(/\b(use[A-Z]\w*)\s*\(/g);
-      for (const match of matches) {
-        hooks.push({ name: match[1], line: i + 1 });
-      }
-    }
-
-    return hooks;
-  }
-
-  private parseApiCalls(content: string): ApiCall[] {
-    const calls: ApiCall[] = [];
-    const lines = content.split("\n");
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // fetch() calls
-      const fetchMatch = line.match(/fetch\s*\(\s*["'`]([^"'`]+)["'`]/);
-      if (fetchMatch) {
-        const method = line.includes("method") ? (line.match(/method:\s*["'](\w+)["']/)?.[1] ?? "GET") : "GET";
-        calls.push({ method, endpoint: fetchMatch[1], line: i + 1 });
-        continue;
-      }
-
-      // axios calls
-      const axiosMatch = line.match(/axios\.(get|post|put|patch|delete)\s*\(\s*["'`]([^"'`]+)["'`]/);
-      if (axiosMatch) {
-        calls.push({ method: axiosMatch[1].toUpperCase(), endpoint: axiosMatch[2], line: i + 1 });
-      }
-    }
-
-    return calls;
-  }
-
-  private extractRelevantCode(filepath: string, errorLine: number): string {
-    try {
-      const content = fs.readFileSync(filepath, "utf-8");
-      const lines = content.split("\n");
-      const start = Math.max(0, errorLine - 10);
-      const end = Math.min(lines.length, errorLine + 10);
-      return lines.slice(start, end).join("\n");
-    } catch {
-      return "";
-    }
-  }
-
-  private readFileContent(filepath: string): string {
-    try {
-      return fs.readFileSync(filepath, "utf-8");
-    } catch {
-      return "";
-    }
+    return { name, children };
   }
 }

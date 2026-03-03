@@ -61,5 +61,4 @@ function withUnravel(nextConfig: NextConfig = {}): NextConfig {
   };
 }
 
-export default withUnravel;
-module.exports = withUnravel;
+export = withUnravel;
