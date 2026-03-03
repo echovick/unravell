@@ -13,6 +13,7 @@ export const overlayStyles: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    animation: "unravel-fade-in 0.2s ease-out",
   },
   container: {
     width: "90vw",
@@ -28,6 +29,7 @@ export const overlayStyles: Record<string, CSSProperties> = {
     overflow: "hidden",
     borderRadius: "12px",
     boxShadow: "0 25px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08)",
+    animation: "unravel-slide-up 0.25s ease-out",
   },
   header: {
     display: "flex",

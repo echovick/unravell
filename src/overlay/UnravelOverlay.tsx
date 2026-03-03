@@ -38,6 +38,8 @@ export function UnravelOverlay({
         <style>{`
           @keyframes unravel-spin { to { transform: rotate(360deg); } }
           @keyframes unravel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+          @keyframes unravel-fade-in { from { opacity: 0; } to { opacity: 1; } }
+          @keyframes unravel-slide-up { from { opacity: 0; transform: translateY(20px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
         `}</style>
 
         {/* Header */}
