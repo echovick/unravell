@@ -80,6 +80,14 @@ export interface DependencyGraph {
   getTransitiveDependents(filepath: string, depth: number): string[];
 }
 
+// ─── Error Classification ───
+
+export type ErrorCategory =
+  | "hydration-mismatch"
+  | "undefined-property"
+  | "unhandled-promise"
+  | "general";
+
 // ─── Error Analysis Types ───
 
 export interface ErrorInfo {
@@ -98,6 +106,7 @@ export interface AffectedFile {
 
 export interface ErrorContext {
   error: ErrorInfo;
+  errorCategory: ErrorCategory;
   affectedFiles: AffectedFile[];
   dataFlowPath: string[];
   relatedComponents: string[];
