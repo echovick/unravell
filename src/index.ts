@@ -2,6 +2,7 @@ export type {
   FileNode,
   DependencyGraph,
   DependencyEdge,
+  ErrorCategory,
   ErrorContext,
   Diagnosis,
   DiagnosisFile,
