@@ -28,52 +28,58 @@ export function UnravelOverlay({
     return () => document.removeEventListener("keydown", handler);
   }, [onDismiss]);
 
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget && onDismiss) onDismiss();
+  };
+
   return (
-    <div style={overlayStyles.container}>
-      <style>{`
-        @keyframes unravel-spin { to { transform: rotate(360deg); } }
-        @keyframes unravel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-      `}</style>
+    <div style={overlayStyles.backdrop} onClick={handleBackdropClick}>
+      <div style={overlayStyles.container}>
+        <style>{`
+          @keyframes unravel-spin { to { transform: rotate(360deg); } }
+          @keyframes unravel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        `}</style>
 
-      {/* Header */}
-      <div style={overlayStyles.header}>
-        <span style={overlayStyles.logo}>Unravel</span>
-        <span style={overlayStyles.errorType}>
-          {error.name}: {error.message}
-        </span>
-        {onDismiss && (
-          <button onClick={onDismiss} style={overlayStyles.closeBtn} title="Dismiss (Esc)">
-            &times;
-          </button>
-        )}
-      </div>
-
-      {/* Body */}
-      <div style={overlayStyles.body}>
-        {/* Left panel: standard error info */}
-        <div style={overlayStyles.leftPanel}>
-          <div style={overlayStyles.heading}>Stack Trace</div>
-          <pre style={overlayStyles.pre}>{error.stack}</pre>
-
-          {componentStack && (
-            <>
-              <div style={{ ...overlayStyles.heading, marginTop: "24px" }}>
-                Component Stack
-              </div>
-              <pre style={overlayStyles.pre}>{componentStack}</pre>
-            </>
+        {/* Header */}
+        <div style={overlayStyles.header}>
+          <span style={overlayStyles.logo}>Unravel</span>
+          <span style={overlayStyles.errorType}>
+            {error.name}: {error.message}
+          </span>
+          {onDismiss && (
+            <button onClick={onDismiss} style={overlayStyles.closeBtn} title="Dismiss (Esc)">
+              &times;
+            </button>
           )}
         </div>
 
-        {/* Right panel: Unravel analysis */}
-        <div style={overlayStyles.rightPanel}>
-          {loading ? (
-            <LoadingState />
-          ) : diagnosis ? (
-            <ErrorPanel diagnosis={diagnosis} />
-          ) : (
-            <FallbackState />
-          )}
+        {/* Body */}
+        <div style={overlayStyles.body}>
+          {/* Left panel: standard error info */}
+          <div style={overlayStyles.leftPanel}>
+            <div style={overlayStyles.heading}>Stack Trace</div>
+            <pre style={overlayStyles.pre}>{error.stack}</pre>
+
+            {componentStack && (
+              <>
+                <div style={{ ...overlayStyles.heading, marginTop: "24px" }}>
+                  Component Stack
+                </div>
+                <pre style={overlayStyles.pre}>{componentStack}</pre>
+              </>
+            )}
+          </div>
+
+          {/* Right panel: Unravel analysis */}
+          <div style={overlayStyles.rightPanel}>
+            {loading ? (
+              <LoadingState />
+            ) : diagnosis ? (
+              <ErrorPanel diagnosis={diagnosis} />
+            ) : (
+              <FallbackState />
+            )}
+          </div>
         </div>
       </div>
     </div>

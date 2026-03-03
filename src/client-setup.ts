@@ -42,6 +42,14 @@ if (typeof window !== "undefined") {
       closeBtn.addEventListener("click", dismissOverlay);
     }
 
+    // Click backdrop to dismiss
+    const backdrop = container.querySelector("[data-unravel-backdrop]");
+    if (backdrop) {
+      backdrop.addEventListener("click", (e) => {
+        if (e.target === backdrop) dismissOverlay();
+      });
+    }
+
     // Wire up tab switching
     container.querySelectorAll("[data-unravel-tab]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -124,19 +132,21 @@ if (typeof window !== "undefined") {
         @keyframes unravel-spin { to { transform: rotate(360deg); } }
         #unravel-overlay * { box-sizing: border-box; margin: 0; padding: 0; }
       </style>
-      <div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;z-index:99999;display:flex;flex-direction:column;overflow:hidden">
-        <div style="display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #333;background:#1a1a2e;gap:12px">
-          <span style="font-weight:700;font-size:16px;color:#7c3aed;flex-shrink:0">Unravel</span>
-          <span style="color:#ef4444;font-family:ui-monospace,'Cascadia Code',Menlo,monospace;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(errorName)}: ${esc(errorMessage)}</span>
-          <button data-unravel-close style="background:none;border:1px solid #555;color:#999;cursor:pointer;padding:4px 8px;border-radius:4px;font-size:14px;flex-shrink:0">&times;</button>
-        </div>
-        <div style="display:flex;flex:1;overflow:hidden">
-          <div style="flex:1;padding:20px;overflow-y:auto;border-right:1px solid #333">
-            <div style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:8px">Stack Trace</div>
-            <pre style="font-family:ui-monospace,'Cascadia Code',Menlo,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#ccc">${esc(errorStack)}</pre>
+      <div data-unravel-backdrop style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center">
+        <div style="width:90vw;max-width:1100px;height:80vh;max-height:700px;background:#1a1a2e;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;display:flex;flex-direction:column;overflow:hidden;border-radius:12px;box-shadow:0 25px 60px rgba(0,0,0,0.5),0 0 0 1px rgba(255,255,255,0.08)">
+          <div style="display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #333;background:#1a1a2e;gap:12px;border-radius:12px 12px 0 0">
+            <span style="font-weight:700;font-size:16px;color:#7c3aed;flex-shrink:0">Unravel</span>
+            <span style="color:#ef4444;font-family:ui-monospace,'Cascadia Code',Menlo,monospace;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(errorName)}: ${esc(errorMessage)}</span>
+            <button data-unravel-close style="background:none;border:1px solid #555;color:#999;cursor:pointer;padding:4px 8px;border-radius:4px;font-size:14px;flex-shrink:0">&times;</button>
           </div>
-          <div style="flex:1;padding:20px;overflow-y:auto">
-            ${rightPanel}
+          <div style="display:flex;flex:1;overflow:hidden">
+            <div style="flex:1;padding:20px;overflow-y:auto;border-right:1px solid #333">
+              <div style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#888;margin-bottom:8px">Stack Trace</div>
+              <pre style="font-family:ui-monospace,'Cascadia Code',Menlo,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#ccc">${esc(errorStack)}</pre>
+            </div>
+            <div style="flex:1;padding:20px;overflow-y:auto">
+              ${rightPanel}
+            </div>
           </div>
         </div>
       </div>`;

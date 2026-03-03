@@ -2,20 +2,32 @@ import type { CSSProperties } from "react";
 
 export const overlayStyles: Record<string, CSSProperties> = {
   // ─── Layout ───
-  container: {
+  backdrop: {
     position: "fixed",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.95)",
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    zIndex: 99999,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  container: {
+    width: "90vw",
+    maxWidth: "1100px",
+    height: "80vh",
+    maxHeight: "700px",
+    backgroundColor: "#1a1a2e",
     color: "#e0e0e0",
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontSize: "14px",
-    zIndex: 99999,
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
+    borderRadius: "12px",
+    boxShadow: "0 25px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08)",
   },
   header: {
     display: "flex",

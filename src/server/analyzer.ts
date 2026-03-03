@@ -118,7 +118,7 @@ function buildAnalysisPrompt(ctx: ErrorContext): string {
   // Truncate relevant code to stay within token budget
   const truncatedFiles = ctx.affectedFiles.map((f) => ({
     ...f,
-    relevantCode: truncateCode(f.relevantCode, 3000),
+    relevantCode: truncateCode(f.relevantCode, 1500),
   }));
 
   return `${errorSpecific}
@@ -129,9 +129,9 @@ Message: ${ctx.error.message}
 Category: ${ctx.errorCategory}
 
 ## Stack Trace
-${truncateCode(ctx.error.stack, 2000)}
+${truncateCode(ctx.error.stack, 1000)}
 
-${ctx.error.componentStack ? `## React Component Stack\n${truncateCode(ctx.error.componentStack, 1000)}` : ""}
+${ctx.error.componentStack ? `## React Component Stack\n${truncateCode(ctx.error.componentStack, 500)}` : ""}
 
 ## Affected Files (from dependency analysis)
 ${truncatedFiles
@@ -280,7 +280,7 @@ function validateDiagnosis(parsed: Record<string, any>): Diagnosis {
 
 // ─── Main Analysis Function ───
 
-const API_TIMEOUT_MS = 30_000;
+const API_TIMEOUT_MS = 15_000;
 
 export async function analyzeError(context: ErrorContext): Promise<Diagnosis> {
   const cacheKey = hashError(context.error.message, context.error.stack);
@@ -295,8 +295,8 @@ export async function analyzeError(context: ErrorContext): Promise<Diagnosis> {
   try {
     const response = await Promise.race([
       client.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 3000,
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1500,
         system: SYSTEM_PROMPT,
         messages: [
           {
