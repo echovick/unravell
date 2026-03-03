@@ -49,15 +49,15 @@
     "claude",
     "dx"
   ],
-  "author": "",
+  "author": "echovick",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/echovick/unravell.git"
   },
-  "homepage": "",
+  "homepage": "https://github.com/echovick/unravell#readme",
   "bugs": {
-    "url": ""
+    "url": "https://github.com/echovick/unravell/issues"
   },
   "engines": {
     "node": ">=18"
