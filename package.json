@@ -1,5 +1,5 @@
 {
-  "name": "unravel",
+  "name": "@echovick/unravel",
   "version": "0.1.0",
   "description": "AI-powered error diagnostics for React and Next.js — replaces the default error overlay with root cause analysis, fix guides, and AI-ready prompts.",
   "main": "dist/index.js",
@@ -61,6 +61,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "sideEffects": false,
   "dependencies": {

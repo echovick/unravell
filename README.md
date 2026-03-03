@@ -9,14 +9,14 @@ When an error occurs in development, instead of just a stack trace, you see **wh
 **Install:**
 
 ```bash
-npm install unravel
+npm install @echovick/unravel
 ```
 
 **Configure** (one line in your Next.js config):
 
 ```js
 // next.config.js
-const withUnravel = require("unravel/next");
+const withUnravel = require("@echovick/unravel/next");
 module.exports = withUnravel({
   // your existing Next.js config
 });
@@ -95,7 +95,7 @@ Unravel checks the API route (if it's a Next.js API route), the fetch call, and 
 If you want to use the error boundary without the Next.js plugin:
 
 ```tsx
-import { UnravelErrorBoundary } from "unravel/overlay";
+import { UnravelErrorBoundary } from "@echovick/unravel/overlay";
 
 function App() {
   return (

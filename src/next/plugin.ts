@@ -30,7 +30,7 @@ function withUnravel(nextConfig: NextConfig = {}): NextConfig {
       try {
         serverProcess = spawn(
           "node",
-          [require.resolve("unravel/dist/server")],
+          [require.resolve("@echovick/unravel/dist/server")],
           {
             env: {
               ...process.env,
@@ -106,7 +106,7 @@ function withUnravel(nextConfig: NextConfig = {}): NextConfig {
           for (const entryName of clientEntries) {
             if (entries[entryName] && Array.isArray(entries[entryName])) {
               try {
-                const clientSetupPath = require.resolve("unravel/dist/client-setup");
+                const clientSetupPath = require.resolve("@echovick/unravel/dist/client-setup");
                 if (!entries[entryName].includes(clientSetupPath)) {
                   entries[entryName].unshift(clientSetupPath);
                 }
