@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 
 export const overlayStyles: Record<string, CSSProperties> = {
+  // ─── Layout ───
   container: {
     position: "fixed",
     top: 0,
@@ -23,6 +24,7 @@ export const overlayStyles: Record<string, CSSProperties> = {
     borderBottom: "1px solid #333",
     backgroundColor: "#1a1a2e",
     gap: "12px",
+    flexShrink: 0,
   },
   logo: {
     fontWeight: 700,
@@ -59,12 +61,16 @@ export const overlayStyles: Record<string, CSSProperties> = {
     padding: "20px",
     overflowY: "auto",
     borderRight: "1px solid #333",
+    minWidth: 0,
   },
   rightPanel: {
     flex: 1,
     padding: "20px",
     overflowY: "auto",
+    minWidth: 0,
   },
+
+  // ─── Typography ───
   pre: {
     fontFamily: 'ui-monospace, "Cascadia Code", Menlo, monospace',
     fontSize: "12px",
@@ -83,6 +89,8 @@ export const overlayStyles: Record<string, CSSProperties> = {
     marginBottom: "8px",
     marginTop: "16px",
   },
+
+  // ─── Confidence Badge ───
   badge: {
     display: "inline-block",
     padding: "2px 8px",
@@ -94,6 +102,8 @@ export const overlayStyles: Record<string, CSSProperties> = {
   badgeHigh: { backgroundColor: "#166534", color: "#4ade80" },
   badgeMedium: { backgroundColor: "#854d0e", color: "#facc15" },
   badgeLow: { backgroundColor: "#991b1b", color: "#fca5a5" },
+
+  // ─── Root Cause ───
   rootCause: {
     fontSize: "15px",
     fontWeight: 500,
@@ -101,6 +111,14 @@ export const overlayStyles: Record<string, CSSProperties> = {
     marginTop: "8px",
     marginBottom: "16px",
     lineHeight: 1.5,
+  },
+
+  // ─── Tabs ───
+  tabBar: {
+    display: "flex",
+    borderBottom: "1px solid #333",
+    marginBottom: "16px",
+    gap: "4px",
   },
   tab: {
     padding: "8px 16px",
@@ -111,32 +129,26 @@ export const overlayStyles: Record<string, CSSProperties> = {
     fontSize: "13px",
     fontWeight: 500,
     borderBottom: "2px solid transparent",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
   },
   tabActive: {
     color: "#e0e0e0",
     borderBottom: "2px solid #7c3aed",
   },
-  tabBar: {
-    display: "flex",
-    borderBottom: "1px solid #333",
-    marginBottom: "16px",
+  tabCount: {
+    backgroundColor: "#333",
+    color: "#aaa",
+    fontSize: "10px",
+    fontWeight: 600,
+    padding: "1px 5px",
+    borderRadius: "8px",
+    minWidth: "16px",
+    textAlign: "center",
   },
-  copyBtn: {
-    padding: "6px 12px",
-    backgroundColor: "#7c3aed",
-    color: "#fff",
-    border: "none",
-    borderRadius: "4px",
-    cursor: "pointer",
-    fontSize: "12px",
-    fontWeight: 500,
-    marginTop: "8px",
-  },
-  step: {
-    padding: "8px 0",
-    borderBottom: "1px solid #2a2a2a",
-    lineHeight: 1.5,
-  },
+
+  // ─── File Cards ───
   fileCard: {
     backgroundColor: "#1e1e2e",
     borderRadius: "6px",
@@ -148,17 +160,91 @@ export const overlayStyles: Record<string, CSSProperties> = {
     fontFamily: 'ui-monospace, "Cascadia Code", Menlo, monospace',
     fontSize: "12px",
     color: "#7c3aed",
-    marginBottom: "4px",
+    marginBottom: "6px",
+    fontWeight: 500,
   },
   fileIssue: {
     color: "#ef4444",
     fontSize: "13px",
     marginBottom: "4px",
+    lineHeight: 1.4,
   },
   fileFix: {
     color: "#4ade80",
     fontSize: "13px",
+    lineHeight: 1.4,
   },
+
+  // ─── Fix Guide Steps ───
+  step: {
+    padding: "10px 0",
+    borderBottom: "1px solid #2a2a2a",
+    lineHeight: 1.5,
+    display: "flex",
+    gap: "10px",
+    alignItems: "flex-start",
+  },
+  stepNumber: {
+    color: "#7c3aed",
+    fontWeight: 700,
+    fontSize: "13px",
+    flexShrink: 0,
+    minWidth: "18px",
+  },
+
+  // ─── AI Prompt ───
+  promptBox: {
+    fontFamily: 'ui-monospace, "Cascadia Code", Menlo, monospace',
+    fontSize: "12px",
+    lineHeight: 1.6,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    margin: 0,
+    color: "#ccc",
+    backgroundColor: "#1e1e2e",
+    padding: "16px",
+    borderRadius: "6px",
+    border: "1px solid #333",
+  },
+  copyBtn: {
+    padding: "8px 16px",
+    backgroundColor: "#7c3aed",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: 500,
+    marginTop: "12px",
+    transition: "background-color 0.2s",
+  },
+  copyBtnSuccess: {
+    backgroundColor: "#166534",
+  },
+
+  // ─── Prevention Tip ───
+  preventionBox: {
+    marginTop: "20px",
+    padding: "12px",
+    backgroundColor: "#1a1a2e",
+    borderRadius: "6px",
+    borderLeft: "3px solid #7c3aed",
+  },
+  preventionLabel: {
+    fontSize: "11px",
+    fontWeight: 600,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.05em",
+    color: "#7c3aed",
+    marginBottom: "4px",
+  },
+  preventionText: {
+    color: "#ccc",
+    lineHeight: 1.5,
+    fontSize: "13px",
+  },
+
+  // ─── Loading ───
   loadingContainer: {
     display: "flex",
     flexDirection: "column",
