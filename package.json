@@ -1,7 +1,7 @@
 {
   "name": "unravel",
   "version": "0.1.0",
-  "description": "AI-powered error diagnostics for React and Next.js",
+  "description": "AI-powered error diagnostics for React and Next.js — replaces the default error overlay with root cause analysis, fix guides, and AI-ready prompts.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -14,6 +14,11 @@
     "./next": {
       "require": "./dist/next/plugin.js"
     },
+    "./overlay": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
     "./dist/server": {
       "require": "./dist/server/index.js"
     },
@@ -21,10 +26,16 @@
       "require": "./dist/client-setup.js"
     }
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "react",
@@ -32,10 +43,26 @@
     "error",
     "debugging",
     "ai",
-    "developer-tools"
+    "developer-tools",
+    "error-overlay",
+    "diagnostics",
+    "claude",
+    "dx"
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "homepage": "",
+  "bugs": {
+    "url": ""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@swc/core": "^1.15.18",

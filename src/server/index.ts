@@ -12,18 +12,43 @@ app.use(express.json({ limit: "1mb" }));
 const projectRoot = process.env.UNRAVEL_PROJECT_ROOT || process.cwd();
 const port = parseInt(process.env.UNRAVEL_PORT || "4839", 10);
 
+// ─── API Key Check ───
+if (!process.env.UNRAVEL_API_KEY) {
+  console.warn(
+    "[Unravel] WARNING: UNRAVEL_API_KEY is not set. AI analysis will not work.\n" +
+    "[Unravel] Add UNRAVEL_API_KEY=sk-ant-... to your .env file.\n" +
+    "[Unravel] Get a key at https://console.anthropic.com/settings/keys"
+  );
+}
+
+// ─── Indexer ───
 const indexer = new CodeIndexer(projectRoot);
 
-// Index the project on startup
 indexer.index().then(() => {
   console.log(`[Unravel] Indexed ${indexer.fileCount} files`);
   console.log(`[Unravel] Dependency graph: ${indexer.edgeCount} connections`);
+}).catch((err) => {
+  console.error(`[Unravel] Indexing failed: ${err.message}`);
 });
 
-// Start watching for changes
 indexer.watch();
 
-// CORS — allow the dev browser to reach this server
+// ─── Graceful Shutdown ───
+let server: ReturnType<typeof app.listen>;
+
+function shutdown() {
+  console.log("[Unravel] Shutting down...");
+  indexer.stopWatching();
+  if (server) {
+    server.close();
+  }
+  process.exit(0);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+// ─── CORS ───
 app.use((_req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Content-Type");
@@ -35,12 +60,17 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Health check
+// ─── Health Check ───
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", files: indexer.fileCount, edges: indexer.edgeCount });
+  res.json({
+    status: "ok",
+    files: indexer.fileCount,
+    edges: indexer.edgeCount,
+    hasApiKey: !!process.env.UNRAVEL_API_KEY,
+  });
 });
 
-// Analysis endpoint
+// ─── Analysis Endpoint ───
 app.post("/analyze", async (req, res) => {
   const startTime = Date.now();
 
@@ -49,6 +79,28 @@ app.post("/analyze", async (req, res) => {
 
     if (!message && !stack) {
       res.status(400).json({ error: "Missing error message or stack trace." });
+      return;
+    }
+
+    // Check API key before making the call
+    if (!process.env.UNRAVEL_API_KEY) {
+      res.json({
+        rootCause: "Unravel API key is not configured.",
+        confidence: "low",
+        explanation:
+          "Add UNRAVEL_API_KEY to your .env file to enable AI-powered error analysis. " +
+          "Get a key at https://console.anthropic.com/settings/keys",
+        affectedFiles: [],
+        fixGuide: [
+          "Step 1: Go to https://console.anthropic.com/settings/keys",
+          "Step 2: Create a new API key",
+          "Step 3: Add UNRAVEL_API_KEY=sk-ant-... to your project's .env file",
+          "Step 4: Restart your dev server",
+        ],
+        aiPrompt: `Fix this error: ${message ?? "unknown"}\n\nStack: ${stack ?? ""}`,
+        preventionTip: "",
+        analyzedAt: Date.now(),
+      });
       return;
     }
 
@@ -109,8 +161,19 @@ app.post("/analyze", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
+// ─── Start Server ───
+server = app.listen(port, () => {
   console.log(`[Unravel] Analysis server running on port ${port}`);
+});
+
+server.on("error", (err: any) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `[Unravel] Port ${port} is already in use. Another Unravel server may be running.`
+    );
+  } else {
+    console.error(`[Unravel] Server error: ${err.message}`);
+  }
 });
 
 // ─── Stack Trace Parsing ───
@@ -131,7 +194,6 @@ function parseStackTrace(stack: string, root: string): StackFrame[] {
     if (!match) {
       match = line.match(/^\s*(.+?)\s+\((\d+):(\d+)\)\s*$/);
       if (match) {
-        // Rearrange captures: [full, filepath, line, col]
         match = [match[0], undefined as any, match[1], match[2], match[3]];
       }
     }
@@ -153,7 +215,7 @@ function parseStackTrace(stack: string, root: string): StackFrame[] {
       continue;
     }
 
-    // Strip webpack module prefix if present (e.g., "webpack:///./src/foo.tsx")
+    // Strip webpack module prefix if present
     filepath = filepath.replace(/^webpack:\/\/\/\.?/, "");
 
     // Resolve to absolute path if relative
@@ -162,13 +224,17 @@ function parseStackTrace(stack: string, root: string): StackFrame[] {
     }
 
     // Only include files that exist in the project
-    if (filepath.startsWith(root) && fs.existsSync(filepath)) {
-      frames.push({
-        file: filepath,
-        line: parseInt(match[3], 10),
-        column: parseInt(match[4], 10),
-        functionName: match[1] || undefined,
-      });
+    try {
+      if (filepath.startsWith(root) && fs.existsSync(filepath)) {
+        frames.push({
+          file: filepath,
+          line: parseInt(match[3], 10),
+          column: parseInt(match[4], 10),
+          functionName: match[1] || undefined,
+        });
+      }
+    } catch {
+      // fs.existsSync can throw on malformed paths — skip
     }
   }
 
@@ -183,23 +249,27 @@ function extractErrorType(message: string, stack: string): string {
 function detectFramework(
   root: string
 ): "next-pages" | "next-app" | "react-cra" | "react-vite" {
-  const hasNext =
-    fs.existsSync(path.join(root, "next.config.js")) ||
-    fs.existsSync(path.join(root, "next.config.mjs")) ||
-    fs.existsSync(path.join(root, "next.config.ts"));
+  try {
+    const hasNext =
+      fs.existsSync(path.join(root, "next.config.js")) ||
+      fs.existsSync(path.join(root, "next.config.mjs")) ||
+      fs.existsSync(path.join(root, "next.config.ts"));
 
-  if (hasNext) {
-    const hasAppDir =
-      fs.existsSync(path.join(root, "app")) ||
-      fs.existsSync(path.join(root, "src", "app"));
-    return hasAppDir ? "next-app" : "next-pages";
-  }
+    if (hasNext) {
+      const hasAppDir =
+        fs.existsSync(path.join(root, "app")) ||
+        fs.existsSync(path.join(root, "src", "app"));
+      return hasAppDir ? "next-app" : "next-pages";
+    }
 
-  if (
-    fs.existsSync(path.join(root, "vite.config.ts")) ||
-    fs.existsSync(path.join(root, "vite.config.js"))
-  ) {
-    return "react-vite";
+    if (
+      fs.existsSync(path.join(root, "vite.config.ts")) ||
+      fs.existsSync(path.join(root, "vite.config.js"))
+    ) {
+      return "react-vite";
+    }
+  } catch {
+    // ignore
   }
 
   return "react-cra";
